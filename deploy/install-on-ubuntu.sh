@@ -181,7 +181,19 @@ fi
 nginx -t
 systemctl daemon-reload
 systemctl enable --now lead-scan.service
-curl --fail --silent --show-error http://127.0.0.1:8082/ >/dev/null
+ready=0
+for _ in {1..30}; do
+    if curl --fail --silent --show-error http://127.0.0.1:8082/ >/dev/null; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [[ "${ready}" -ne 1 ]]; then
+    echo "lead-scan.service did not become ready on 127.0.0.1:8082" >&2
+    systemctl status lead-scan.service --no-pager -l >&2 || true
+    exit 1
+fi
 systemctl enable --now lead-scan-backup.timer
 systemctl reload nginx
 
