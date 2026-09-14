@@ -33,6 +33,7 @@ install -d -o root -g root -m 0755 "${APP_DIR}"
 rsync -a --delete --exclude '.venv/' --exclude 'data/' "${SOURCE_DIR}/" "${APP_DIR}/"
 chown -R root:root "${APP_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0750 "${APP_DIR}/data"
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${APP_DIR}/data"
 
 if [[ ! -x "${APP_DIR}/.venv/bin/python" ]]; then
     python3 -m venv "${APP_DIR}/.venv"
