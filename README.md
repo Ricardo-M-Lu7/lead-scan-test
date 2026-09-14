@@ -2,7 +2,7 @@
 
 This project provides the first Advinsys customer journey: scan a QR code, record an anonymous scan event, open an English customer enquiry form, and store the submitted lead in SQLite.
 
-The form collects `Full Name`, `Phone Number`, `Street Address`, `Suburb`, `State / Territory`, `Postcode`, one or more `Intended Product` selections, and optional `Other Requirements`. Product choices are `Pool Wave Maker`, `Pool Heat Pump`, `Pool Pump`, `Pool Salt Chlorinator`, `Robotic Lawn Mower`, and `Tennis Ball Machine`. It is designed for Australian address and phone-number formats.
+The form collects a required `Customer Type` (`Business` or `Individual`), `Full Name`, `Phone Number`, `Street Address`, `Suburb`, `State / Territory`, `Postcode`, one or more `Intended Product` selections, and optional `Other Requirements`. Product choices are `Pool Wave Maker`, `Pool Heat Pump`, `Pool Pump`, `Pool Salt Chlorinator`, `Robotic Lawn Mower`, and `Tennis Ball Machine`. It is designed for Australian address and phone-number formats.
 
 ## Run locally
 
@@ -29,8 +29,11 @@ The temporary URL changes whenever the tunnel process restarts. It is for testin
 
 For a domain such as `https://lead-test.example.com`, set `PUBLIC_BASE_URL` before starting the service and configure a named tunnel or other HTTPS hosting to forward that hostname to `http://127.0.0.1:8082`.
 
+When the service is mounted below an existing site, set `PUBLIC_BASE_PATH` to the path without a trailing slash. For example, `PUBLIC_BASE_URL=https://cellar.yesthing.com` and `PUBLIC_BASE_PATH=/lead-scan` publish the service at `https://cellar.yesthing.com/lead-scan/`.
+
 ```powershell
 $env:PUBLIC_BASE_URL = "https://lead-test.example.com"
+$env:PUBLIC_BASE_PATH = ""
 .\scripts\start-local.ps1
 ```
 
@@ -60,7 +63,7 @@ Invoke-RestMethod -Headers $headers https://lead-test.example.com/internal/leads
 
 ## Lead Management
 
-The English Lead Management page is available at `/admin`. It provides password-protected lead search, filtering, status updates, detail views, pagination, and CSV export.
+The English Lead Management page is available at `/admin`. It provides password-protected lead search, filtering, status updates, detail views, pagination, Excel export, soft deletion, batch deletion, and a recycle bin. Exports use filenames such as `advinsys-leads-all-20260911-154230.xlsx` or `advinsys-leads-filtered-20260911-154230.xlsx`.
 
 Set an administrator password and a separate session-signing secret before starting the service. Keep both values out of source control.
 
@@ -71,6 +74,8 @@ $env:ADMIN_SESSION_SECRET = & .\.venv\Scripts\python.exe -c "import secrets; pri
 ```
 
 Open `http://127.0.0.1:8082/admin` locally, or append `/admin` to the stable public HTTPS domain. The page uses the statuses `New`, `Contacted`, `Qualified`, and `Closed`.
+
+Select one or more leads from the active list and choose `Delete selected`, or delete an individual lead from its detail page. A centered in-page confirmation dialog appears before deletion. Deletion is soft: active lists, counts, exports, the protected leads endpoint, and public confirmation pages exclude deleted leads. Deleted leads remain recoverable in the recycle bin for 30 days and can be restored during that period. This project does not expose a permanent-delete action; records older than the 30-day recycle-bin window remain stored but are no longer shown or recoverable through the admin UI.
 
 ## Privacy boundaries
 

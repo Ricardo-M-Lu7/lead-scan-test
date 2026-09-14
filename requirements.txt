@@ -1,2 +1,3 @@
 qrcode>=8.2,<9
 tzdata>=2025.2,<2027
+XlsxWriter>=3.2,<4
