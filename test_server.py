@@ -150,6 +150,12 @@ class ScanRedirectTests(unittest.TestCase):
         self.assertIn(b'name="customer_type" value="individual"', body)
         self.assertIn(b'data-product-picker', body)
         self.assertIn(b'type="checkbox"', body)
+        email_input = re.search(rb'<input[^>]*name="email_address"[^>]*>', body)
+        self.assertIsNotNone(email_input)
+        self.assertIn(b'type="email"', email_input.group())
+        self.assertIn(b'autocomplete="email"', email_input.group())
+        self.assertIn(b' required', email_input.group())
+        self.assertIn(b'<span class="field-label">Email Address</span>', body)
         for _code, label in server.PRODUCT_OPTIONS:
             self.assertIn(label.encode("utf-8"), body)
 
@@ -172,6 +178,7 @@ class ScanRedirectTests(unittest.TestCase):
             "customer_type": "business",
             "full_name": "Taylor Smith",
             "phone_number": "+61 412 345 678",
+            "email_address": "  taylor+enquiry@example.com  ",
             "street_address": "12 Collins Street",
             "suburb": "Melbourne",
             "state_territory": "VIC",
@@ -191,7 +198,7 @@ class ScanRedirectTests(unittest.TestCase):
         status, _headers, body = self.request(headers["Location"])
         self.assertEqual(status, 200)
         self.assertIn(b"Thank you, Taylor Smith.", body)
-        self.assertIn(b"Pool Heat Pump; Pool Pump", body)
+        self.assertIn(b"Pool Heat Pump; Robotic Pool Cleaner", body)
 
         status, _headers, body = self.request(
             "/internal/leads?code=onsite-test",
@@ -203,7 +210,69 @@ class ScanRedirectTests(unittest.TestCase):
         self.assertEqual(payload["leads"][0]["full_name"], "Taylor Smith")
         self.assertEqual(payload["leads"][0]["customer_type"], "business")
         self.assertEqual(payload["leads"][0]["postcode"], "3000")
-        self.assertEqual(payload["leads"][0]["intended_product"], "Pool Heat Pump; Pool Pump")
+        self.assertEqual(payload["leads"][0]["email_address"], "taylor+enquiry@example.com")
+        self.assertEqual(payload["leads"][0]["intended_product"], "Pool Heat Pump; Robotic Pool Cleaner")
+
+        cookie, _csrf = self.admin_login()
+        lead_id = payload["leads"][0]["id"]
+        status, _headers, body = self.request(f"/admin/leads/{lead_id}", {"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertIn(b"taylor+enquiry@example.com", body)
+        status, _headers, body = self.request("/admin/export.xlsx", {"Cookie": cookie})
+        self.assertEqual(status, 200)
+        strings = xlsx_shared_strings(body)
+        self.assertIn("Email Address", strings)
+        self.assertIn("taylor+enquiry@example.com", strings)
+        namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+        worksheet = ET.fromstring(xlsx_worksheet_xml(body))
+        for reference, expected in (("G1", "Email Address"), ("G2", "taylor+enquiry@example.com")):
+            cell = worksheet.find(f'.//{namespace}c[@r="{reference}"]/{namespace}v')
+            self.assertIsNotNone(cell)
+            self.assertEqual(strings[int(cell.text)], expected)
+
+    def test_required_email_rejects_empty_and_invalid_values(self):
+        fields = {
+            "customer_type": "individual",
+            "full_name": "Taylor Smith",
+            "phone_number": "+61 412 345 678",
+            "street_address": "12 Collins Street",
+            "suburb": "Melbourne",
+            "state_territory": "VIC",
+            "postcode": "3000",
+            "intended_product": "pool_heat_pump",
+        }
+        for email in (None, "", "   "):
+            with self.subTest(email=email):
+                form = fields if email is None else {**fields, "email_address": email}
+                status, _headers, body = self.request(
+                    "/entry/onsite-test",
+                    {"Content-Type": "application/x-www-form-urlencoded"},
+                    "POST", urlencode(form).encode("utf-8"),
+                )
+                self.assertEqual(status, 400)
+                self.assertIn(b"Enter your email address.", body)
+                self.assertIn(b'aria-describedby="error-email_address"', body)
+        self.assertEqual(server.list_leads(100), [])
+        count_before = len(server.list_leads(100))
+        for email in ("not-an-email", "a@@example.com", "a b@example.com", "a@-example.com", 'a"@example.com', "a\n@example.com", "a" * 243 + "@example.com"):
+            with self.subTest(email=email):
+                status, _headers, body = self.request(
+                    "/entry/onsite-test",
+                    {"Content-Type": "application/x-www-form-urlencoded"},
+                    "POST", urlencode({**fields, "email_address": email}).encode("utf-8"),
+                )
+                self.assertEqual(status, 400)
+                self.assertIn(b'id="error-email_address"', body)
+                self.assertIn(b'aria-describedby="error-email_address"', body)
+        self.assertEqual(len(server.list_leads(100)), count_before)
+
+        status, _headers, body = self.request(
+            "/entry/onsite-test",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+            "POST", urlencode({**fields, "postcode": "300", "email_address": "saved@example.com"}).encode("utf-8"),
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b'name="email_address" value="saved@example.com"', body)
 
     def test_customer_enquiry_requires_valid_australian_address_fields(self):
         form = urlencode({
@@ -323,10 +392,12 @@ class ScanRedirectTests(unittest.TestCase):
 
         connection.close()
         server.initialise_database()
+        server.initialise_database()
         lead = server.get_lead("LD-LEGACY")
         self.assertIsNotNone(lead)
         self.assertEqual(lead["customer_type"], "unknown")
         self.assertEqual(lead["status"], "new")
+        self.assertEqual(lead["email_address"], "")
 
     def test_analytics_requires_a_secret_key(self):
         status, _headers, _body = self.request("/internal/analytics")
@@ -344,6 +415,7 @@ class ScanRedirectTests(unittest.TestCase):
             "customer_type": "individual",
             "full_name": "Taylor Smith",
             "phone_number": "+61 412 345 678",
+            "email_address": "taylor@example.com",
             "street_address": "12 Collins Street",
             "suburb": "Melbourne",
             "state_territory": "VIC",
@@ -476,7 +548,8 @@ class ScanRedirectTests(unittest.TestCase):
         self.assertIn("Contacted", strings)
         self.assertNotIn("QR Source", strings)
         self.assertNotIn("onsite-test", strings)
-        self.assertIn('autoFilter ref="A1:L2"', xlsx_worksheet_xml(body))
+        self.assertIn("Email Address", strings)
+        self.assertIn('autoFilter ref="A1:M2"', xlsx_worksheet_xml(body))
         styles = xlsx_styles_xml(body)
         self.assertIn('rgb="FFFFFFFF"', styles)
         self.assertIn('rgb="FF000000"', styles)

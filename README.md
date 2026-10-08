@@ -2,7 +2,7 @@
 
 This project provides the first Advinsys customer journey: scan a QR code, record an anonymous scan event, open an English customer enquiry form, and store the submitted lead in SQLite.
 
-The form collects a required `Customer Type` (`Business` or `Individual`), `Full Name`, `Phone Number`, `Street Address`, `Suburb`, `State / Territory`, `Postcode`, one or more `Intended Product` selections, and optional `Other Requirements`. Product choices are `Pool Wave Maker`, `Pool Heat Pump`, `Pool Pump`, `Pool Salt Chlorinator`, `Robotic Lawn Mower`, and `Tennis Ball Machine`. It is designed for Australian address and phone-number formats.
+The form collects a required `Customer Type` (`Business` or `Individual`), `Full Name`, `Phone Number`, `Email Address`, `Street Address`, `Suburb`, `State / Territory`, `Postcode`, one or more selections under `PRODUCTS OF INTEREST`, plus `Additional Comments (Optional)`. Product choices are `Portable SWIM JET X`, `Pool Heat Pump`, `Robotic Pool Cleaner`, `Robotic Lawn Mower`, and `Tennis Robot`. It is designed for Australian address and phone-number formats. Email addresses are required and checked for format, saved with the lead, and shown in admin lead details and Excel exports. Existing records without email addresses remain supported.
 
 ## Run locally
 

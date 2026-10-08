@@ -34,12 +34,11 @@ HOST_PATTERN = re.compile(r"^[A-Za-z0-9.-]+(?::\d{1,5})?$")
 DB_LOCK = threading.RLock()
 AU_STATES = ("ACT", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA")
 PRODUCT_OPTIONS = (
-    ("pool_wave_maker", "Pool Wave Maker"),
+    ("pool_wave_maker", "Portable SWIM JET X"),
     ("pool_heat_pump", "Pool Heat Pump"),
-    ("pool_pump", "Pool Pump"),
-    ("pool_salt_chlorinator", "Pool Salt Chlorinator"),
+    ("pool_pump", "Robotic Pool Cleaner"),
     ("robotic_lawn_mower", "Robotic Lawn Mower"),
-    ("tennis_ball_machine", "Tennis Ball Machine"),
+    ("tennis_ball_machine", "Tennis Robot"),
 )
 PRODUCT_LABELS = dict(PRODUCT_OPTIONS)
 PRODUCT_SEPARATOR = "; "
@@ -56,6 +55,7 @@ FIELD_LIMITS = {
     "customer_type": 20,
     "full_name": 160,
     "phone_number": 32,
+    "email_address": 254,
     "street_address": 200,
     "suburb": 100,
     "state_territory": 3,
@@ -71,7 +71,7 @@ ADMIN_SESSION_COOKIE = "advinsys_admin_session"
 ADMIN_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 SYDNEY_TIME_ZONE = ZoneInfo("Australia/Sydney")
 EXCEL_EXPORT_HEADERS = (
-    "Reference", "Submitted (Australia/Sydney)", "Status", "Customer Type", "Full Name", "Phone Number",
+    "Reference", "Submitted (Australia/Sydney)", "Status", "Customer Type", "Full Name", "Phone Number", "Email Address",
     "Street Address", "Suburb", "State / Territory", "Postcode", "Intended Product",
     "Other Requirements",
 )
@@ -113,6 +113,7 @@ def initialise_database() -> None:
                     CHECK(customer_type IN ('business', 'individual', 'unknown')),
                 full_name TEXT NOT NULL,
                 phone_number TEXT NOT NULL,
+                email_address TEXT NOT NULL DEFAULT '',
                 street_address TEXT NOT NULL,
                 suburb TEXT NOT NULL,
                 state_territory TEXT NOT NULL,
@@ -137,6 +138,8 @@ def initialise_database() -> None:
             """
         )
         lead_columns = {row["name"] for row in connection.execute("PRAGMA table_info(leads)")}
+        if "email_address" not in lead_columns:
+            connection.execute("ALTER TABLE leads ADD COLUMN email_address TEXT NOT NULL DEFAULT ''")
         if "customer_type" not in lead_columns:
             connection.execute(
                 "ALTER TABLE leads ADD COLUMN customer_type TEXT NOT NULL DEFAULT 'unknown' "
@@ -227,10 +230,10 @@ def create_lead(code: str, values: dict[str, str]) -> str:
         connection.execute(
             """
             INSERT INTO leads (
-                id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+                id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                 state_territory, postcode, intended_product, other_requirements, submitted_at,
                 status, status_updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
             """,
             (
                 lead_id,
@@ -238,6 +241,7 @@ def create_lead(code: str, values: dict[str, str]) -> str:
                 values["customer_type"],
                 values["full_name"],
                 values["phone_number"],
+                values.get("email_address", ""),
                 values["street_address"],
                 values["suburb"],
                 values["state_territory"],
@@ -255,7 +259,7 @@ def get_lead(lead_id: str) -> sqlite3.Row | None:
     with DB_LOCK, database_connection() as connection:
         return connection.execute(
             """
-            SELECT id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+            SELECT id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                    state_territory, postcode, intended_product, other_requirements, submitted_at,
                    status, status_updated_at, deleted_at, deleted_by
             FROM leads WHERE id = ? AND deleted_at IS NULL
@@ -268,7 +272,7 @@ def get_lead_in_trash(lead_id: str) -> sqlite3.Row | None:
     with DB_LOCK, database_connection() as connection:
         return connection.execute(
             """
-            SELECT id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+            SELECT id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                    state_territory, postcode, intended_product, other_requirements, submitted_at,
                    status, status_updated_at, deleted_at, deleted_by
             FROM leads
@@ -280,7 +284,7 @@ def get_lead_in_trash(lead_id: str) -> sqlite3.Row | None:
 
 def list_leads(limit: int, code: str | None = None) -> list[sqlite3.Row]:
     query = """
-        SELECT id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+        SELECT id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                state_territory, postcode, intended_product, other_requirements, submitted_at,
                status, status_updated_at
         FROM leads
@@ -368,7 +372,7 @@ def list_admin_leads(filters: dict[str, str], page: int, view: str = "active") -
     where, params = lead_filter_sql(filters, view)
     params.extend((LEADS_PER_PAGE, (page - 1) * LEADS_PER_PAGE))
     query = f"""
-        SELECT id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+        SELECT id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                state_territory, postcode, intended_product, other_requirements, submitted_at,
                status, status_updated_at
         FROM leads{where}
@@ -382,7 +386,7 @@ def list_admin_leads(filters: dict[str, str], page: int, view: str = "active") -
 def list_filtered_leads(filters: dict[str, str], view: str = "active") -> list[sqlite3.Row]:
     where, params = lead_filter_sql(filters, view)
     query = f"""
-        SELECT id, qr_code, customer_type, full_name, phone_number, street_address, suburb,
+        SELECT id, qr_code, customer_type, full_name, phone_number, email_address, street_address, suburb,
                state_territory, postcode, intended_product, other_requirements, submitted_at,
                status, status_updated_at
         FROM leads{where}
@@ -588,6 +592,7 @@ def validate_lead_form(raw_values: dict[str, str | list[str]]) -> tuple[dict[str
         "customer_type": "Choose whether you are enquiring as a business or individual.",
         "full_name": "Enter your full name.",
         "phone_number": "Enter your phone number.",
+        "email_address": "Enter your email address.",
         "street_address": "Enter your street address.",
         "suburb": "Enter your suburb.",
         "state_territory": "Select your state or territory.",
@@ -605,6 +610,13 @@ def validate_lead_form(raw_values: dict[str, str | list[str]]) -> tuple[dict[str
     phone_compact = re.sub(r"[\s()-]", "", values["phone_number"])
     if values["phone_number"] and not re.fullmatch(r"\+?\d{8,15}", phone_compact):
         errors["phone_number"] = "Enter a valid phone number with 8 to 15 digits."
+    if values["email_address"] and not re.fullmatch(
+        r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+        r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*",
+        values["email_address"],
+    ):
+        errors["email_address"] = "Enter a valid email address."
     if values["state_territory"] and values["state_territory"] not in AU_STATES:
         errors["state_territory"] = "Select an Australian state or territory."
     if values["postcode"] and not re.fullmatch(r"\d{4}", values["postcode"]):
@@ -751,15 +763,18 @@ def text_field(
     autocomplete: str = "",
     input_type: str = "text",
     placeholder: str = "",
+    required: bool = True,
+    wide: bool = False,
 ) -> str:
     value = html.escape(values.get(field, ""), quote=True)
     invalid = ' aria-invalid="true" aria-describedby="error-' + field + '"' if field in errors else ""
     autocomplete_attr = f' autocomplete="{html.escape(autocomplete, quote=True)}"' if autocomplete else ""
+    optional_label = ' <span class="optional">(Optional)</span>' if not required else ""
     return f"""
-    <label class="field-card">
-      <span class="field-label">{html.escape(label)}</span>
+    <label class="field-card{' field-card-wide' if wide else ''}">
+      <span class="field-label">{html.escape(label)}{optional_label}</span>
       <input class="field-input" type="{input_type}" name="{field}" value="{value}"{autocomplete_attr}
-        placeholder="{html.escape(placeholder, quote=True)}" required{invalid}>
+        placeholder="{html.escape(placeholder, quote=True)}"{' required' if required else ''}{invalid}>
       {field_error(field, errors)}
     </label>"""
 
@@ -784,7 +799,7 @@ def textarea_field(label: str, field: str, values: dict[str, str], errors: dict[
     value = html.escape(values.get(field, ""))
     return f"""
     <label class="field-card field-card-wide">
-      <span class="field-label">{html.escape(label)} <span class="optional">Optional</span></span>
+      <span class="field-label">{html.escape(label)} <span class="optional">(Optional)</span></span>
       <textarea class="field-textarea" name="{field}" rows="5" placeholder="Tell us anything else that would help us assist you."{invalid}>{value}</textarea>
       {field_error(field, errors)}
     </label>"""
@@ -826,8 +841,7 @@ def product_field(values: dict[str, str], errors: dict[str, str]) -> str:
     )
     return f"""
     <div class="field-card field-card-wide product-field">
-      <span class="field-label">Intended Product</span>
-      <details class="product-picker" data-product-picker aria-required="true"{invalid}>
+      <details class="product-picker" data-product-picker aria-label="Products of interest" aria-required="true"{invalid}>
         <summary class="field-select product-picker-summary" data-product-summary>{html.escape(summary_text)}</summary>
         <div class="product-picker-menu" role="group" aria-label="Product options">
           {options}
@@ -845,24 +859,24 @@ def entry_page(
 ) -> bytes:
     values = values or {}
     errors = errors or {}
-    form_title = "Please correct the highlighted fields." if errors else "Complete the form and our team will contact you."
+    form_title = "Please correct the highlighted fields." if errors else "Please complete the form below"
     body = f"""
 <div class="form-shell">
   <aside class="sidebar" aria-label="Enquiry progress">
     <div class="sidebar-inner">
       <div class="side-card">
         <p class="side-kicker">ADVINSYS</p>
-        <h2 class="side-title">Customer enquiry</h2>
-        <p class="side-copy">Share your details and product interest with our team.</p>
+        <h2 class="side-title">Customer Enquiry</h2>
+        <p class="side-copy">Let us know your details and product interests.</p>
         <div class="progress" aria-label="Step 2 of 3">
           <div class="progress-meta"><span>Progress</span><span>2 of 3</span></div>
           <div class="progress-bar"><span style="width: 66%"></span></div>
         </div>
       </div>
       <nav class="nav" aria-label="Enquiry steps">
-        <div class="nav-item is-done"><span class="nav-num">1</span><span><strong class="nav-title">Scan complete</strong><small class="nav-sub">You are connected to Advinsys.</small></span></div>
-        <div class="nav-item is-current"><span class="nav-num">2</span><span><strong class="nav-title">Your details</strong><small class="nav-sub">Tell us how we can help.</small></span></div>
-        <div class="nav-item"><span class="nav-num">3</span><span><strong class="nav-title">Confirmation</strong><small class="nav-sub">We will record your enquiry.</small></span></div>
+        <div class="nav-item is-done"><span class="nav-num">1</span><span><strong class="nav-title">Scan complete.</strong><small class="nav-sub">You're now connected to Advinsys.</small></span></div>
+        <div class="nav-item is-current"><span class="nav-num">2</span><span><strong class="nav-title">Your Details.</strong><small class="nav-sub">us how we can help.</small></span></div>
+        <div class="nav-item"><span class="nav-num">3</span><span><strong class="nav-title">Confirmation.</strong><small class="nav-sub">We will process your enquiry.</small></span></div>
       </nav>
     </div>
   </aside>
@@ -881,6 +895,7 @@ def entry_page(
           <div class="grid grid-2">
             {text_field("Full Name", "full_name", values, errors, autocomplete="name", placeholder="Your full name")}
             {text_field("Phone Number", "phone_number", values, errors, autocomplete="tel", input_type="tel", placeholder="e.g. 04XX XXX XXX")}
+            {text_field("Email Address", "email_address", values, errors, autocomplete="email", input_type="email", placeholder="e.g. name@example.com", wide=True)}
           </div>
           <div class="section-head section-head-spaced"><span class="section-num">03</span><h2>Address</h2></div>
           <div class="grid grid-2">
@@ -889,12 +904,12 @@ def entry_page(
             {state_field(values, errors)}
             {text_field("Postcode", "postcode", values, errors, autocomplete="postal-code", input_type="text", placeholder="4-digit postcode")}
           </div>
-          <div class="section-head section-head-spaced"><span class="section-num">04</span><h2>Product interest</h2></div>
+          <div class="section-head section-head-spaced"><span class="section-num">04</span><h2>PRODUCTS OF INTEREST</h2></div>
           <div class="grid grid-2">
             {product_field(values, errors)}
-            {textarea_field("Other Requirements", "other_requirements", values, errors)}
+            {textarea_field("Additional Comments", "other_requirements", values, errors)}
           </div>
-          <div class="footer-actions"><div class="footer-actions-inner"><span class="form-note">Fields marked as required must be completed.</span><button class="button button-primary" type="submit">Submit enquiry</button></div></div>
+          <div class="footer-actions"><div class="footer-actions-inner"><span class="form-note">Fields marked as required must be completed.</span><button class="button button-primary" type="submit">Submit Enquiry</button></div></div>
         </form>
         <script>
           (() => {{
@@ -1190,7 +1205,7 @@ def admin_lead_detail_page(lead: sqlite3.Row, session_nonce: str, updated: bool 
 <section class="admin-detail-head"><div><a class="button admin-button-secondary admin-back-link" href="{back_href}">Back to {'recycle bin' if deleted else 'all leads'}</a><p class="eyebrow">LEAD DETAIL</p><h1>{html.escape(lead['full_name'])}</h1><p class="lead">Submitted {html.escape(format_sydney_datetime(lead['submitted_at']))}</p></div><span class="lead-status lead-status-{html.escape(lead['status'], quote=True)}">{html.escape(status_label(lead['status']))}</span></section>
 {update_message}
 <div class="admin-detail-grid">
-  <section class="admin-detail-section"><h2>Contact details</h2><dl><div><dt>Customer type</dt><dd>{html.escape(CUSTOMER_TYPE_LABELS.get(lead['customer_type'], "Unknown (legacy)"))}</dd></div><div><dt>Full name</dt><dd>{html.escape(lead['full_name'])}</dd></div><div><dt>Phone number</dt><dd>{html.escape(lead['phone_number'])}</dd></div><div><dt>Address</dt><dd>{address_lines}</dd></div></dl></section>
+  <section class="admin-detail-section"><h2>Contact details</h2><dl><div><dt>Customer type</dt><dd>{html.escape(CUSTOMER_TYPE_LABELS.get(lead['customer_type'], "Unknown (legacy)"))}</dd></div><div><dt>Full name</dt><dd>{html.escape(lead['full_name'])}</dd></div><div><dt>Phone number</dt><dd>{html.escape(lead['phone_number'])}</dd></div><div><dt>Email address</dt><dd>{html.escape(lead['email_address']) if lead['email_address'] else "Not provided"}</dd></div><div><dt>Address</dt><dd>{address_lines}</dd></div></dl></section>
   <section class="admin-detail-section"><h2>Enquiry</h2><dl><div><dt>Intended product</dt><dd>{html.escape(lead['intended_product'])}</dd></div><div><dt>Other requirements</dt><dd class="admin-multiline">{requirements}</dd></div><div><dt>Reference</dt><dd>{html.escape(lead['id'])}</dd></div></dl></section>
   {status_editor}
   {delete_action}
@@ -1715,9 +1730,9 @@ class Handler(BaseHTTPRequestHandler):
         multiline_format = workbook.add_format({"valign": "top", "text_wrap": True, "num_format": "@", "bg_color": "#FFFFFF", "border": 1, "border_color": "#000000"})
         date_format = workbook.add_format({"valign": "top", "num_format": "dd mmm yyyy, hh:mm AM/PM", "bg_color": "#FFFFFF", "border": 1, "border_color": "#000000"})
         worksheet.set_row(0, 24)
-        column_widths = (20, 27, 14, 18, 22, 18, 28, 18, 18, 12, 28, 48)
+        column_widths = (20, 27, 14, 18, 22, 18, 32, 28, 18, 18, 12, 28, 48)
         for column, width in enumerate(column_widths):
-            default_format = multiline_format if column == 11 else text_format
+            default_format = multiline_format if column == len(EXCEL_EXPORT_HEADERS) - 1 else text_format
             worksheet.set_column(column, column, width, default_format)
         for column, header in enumerate(EXCEL_EXPORT_HEADERS):
             worksheet.write_string(0, column, header, header_format)
@@ -1729,13 +1744,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 worksheet.write_datetime(row_index, 1, submitted_at, date_format)
             values = (
-                lead["id"], status_label(lead["status"]), CUSTOMER_TYPE_LABELS.get(lead["customer_type"], "Unknown (legacy)"), lead["full_name"], lead["phone_number"],
+                lead["id"], status_label(lead["status"]), CUSTOMER_TYPE_LABELS.get(lead["customer_type"], "Unknown (legacy)"), lead["full_name"], lead["phone_number"], lead["email_address"],
                 lead["street_address"], lead["suburb"], lead["state_territory"], lead["postcode"],
                 lead["intended_product"], lead["other_requirements"],
             )
             for column, value in enumerate(values):
                 target_column = column if column == 0 else column + 1
-                cell_format = multiline_format if target_column == 11 else text_format
+                cell_format = multiline_format if target_column == len(EXCEL_EXPORT_HEADERS) - 1 else text_format
                 worksheet.write_string(row_index, target_column, value or "", cell_format)
 
         worksheet.autofilter(0, 0, len(leads), len(EXCEL_EXPORT_HEADERS) - 1)
