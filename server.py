@@ -593,10 +593,6 @@ def validate_lead_form(raw_values: dict[str, str | list[str]]) -> tuple[dict[str
         "full_name": "Enter your full name.",
         "phone_number": "Enter your phone number.",
         "email_address": "Enter your email address.",
-        "street_address": "Enter your street address.",
-        "suburb": "Enter your suburb.",
-        "state_territory": "Select your state or territory.",
-        "postcode": "Enter your postcode.",
         "intended_product": "Describe the product you are interested in.",
     }
     for field, message in required_fields.items():
@@ -808,7 +804,7 @@ def textarea_field(label: str, field: str, values: dict[str, str], errors: dict[
 def state_field(values: dict[str, str], errors: dict[str, str]) -> str:
     selected_state = values.get("state_territory", "")
     placeholder_selected = " selected" if selected_state not in AU_STATES else ""
-    options = [f'<option value="" disabled{placeholder_selected}>Select state or territory</option>']
+    options = [f'<option value=""{placeholder_selected}>Select state or territory</option>']
     options.extend(
         f'<option value="{state}"{" selected" if state == selected_state else ""}>{state}</option>'
         for state in AU_STATES
@@ -816,8 +812,8 @@ def state_field(values: dict[str, str], errors: dict[str, str]) -> str:
     invalid = ' aria-invalid="true" aria-describedby="error-state_territory"' if "state_territory" in errors else ""
     return f"""
     <label class="field-card">
-      <span class="field-label">State / Territory</span>
-      <select class="field-select" name="state_territory" autocomplete="address-level1" required{invalid}>
+      <span class="field-label">State / Territory <span class="optional">(Optional)</span></span>
+      <select class="field-select" name="state_territory" autocomplete="address-level1"{invalid}>
         {''.join(options)}
       </select>
       {field_error("state_territory", errors)}
@@ -899,10 +895,10 @@ def entry_page(
           </div>
           <div class="section-head section-head-spaced"><span class="section-num">03</span><h2>Address</h2></div>
           <div class="grid grid-2">
-            {text_field("Street Address", "street_address", values, errors, autocomplete="street-address", placeholder="Street number and name")}
-            {text_field("Suburb", "suburb", values, errors, autocomplete="address-level2", placeholder="Your suburb")}
+            {text_field("Street Address", "street_address", values, errors, autocomplete="street-address", placeholder="Street number and name", required=False)}
+            {text_field("Suburb", "suburb", values, errors, autocomplete="address-level2", placeholder="Your suburb", required=False)}
             {state_field(values, errors)}
-            {text_field("Postcode", "postcode", values, errors, autocomplete="postal-code", input_type="text", placeholder="4-digit postcode")}
+            {text_field("Postcode", "postcode", values, errors, autocomplete="postal-code", input_type="text", placeholder="4-digit postcode", required=False)}
           </div>
           <div class="section-head section-head-spaced"><span class="section-num">04</span><h2>PRODUCTS OF INTEREST</h2></div>
           <div class="grid grid-2">

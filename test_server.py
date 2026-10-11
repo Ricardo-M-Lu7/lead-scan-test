@@ -169,7 +169,7 @@ class ScanRedirectTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"How can we help?", body)
         self.assertIn(b"State / Territory", body)
-        self.assertIn(b'<option value="" disabled selected>Select state or territory</option>', body)
+        self.assertIn(b'<option value="" selected>Select state or territory</option>', body)
         self.assertEqual(server.event_count("onsite-test", "qr_opened"), 1)
         self.assertEqual(server.event_count("onsite-test", "landing_viewed"), 1)
 
@@ -274,7 +274,49 @@ class ScanRedirectTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn(b'name="email_address" value="saved@example.com"', body)
 
-    def test_customer_enquiry_requires_valid_australian_address_fields(self):
+    def test_customer_enquiry_accepts_optional_address_fields(self):
+        address = {
+            "street_address": "12 Collins Street",
+            "suburb": "Melbourne",
+            "state_territory": "VIC",
+            "postcode": "3000",
+        }
+        fields = {
+            "customer_type": "individual",
+            "full_name": "Taylor Smith",
+            "phone_number": "+61 412 345 678",
+            "email_address": "taylor@example.com",
+            "intended_product": "pool_heat_pump",
+        }
+        status, _headers, body = self.request("/entry/onsite-test")
+        self.assertEqual(status, 200)
+        for field in address:
+            element = re.search(fr'<(?:input|select)[^>]*name="{field}"[^>]*>'.encode(), body)
+            self.assertIsNotNone(element)
+            self.assertNotIn(b' required', element.group())
+        for supplied in (
+            {},
+            dict.fromkeys(address, ""),
+            dict.fromkeys(address, "   "),
+            address,
+            *({field: value} for field, value in address.items()),
+        ):
+            with self.subTest(address=supplied):
+                status, headers, _body = self.request(
+                    "/entry/onsite-test",
+                    {"Content-Type": "application/x-www-form-urlencoded"},
+                    "POST", urlencode({**fields, **supplied}).encode("utf-8"),
+                )
+                self.assertEqual(status, 303)
+                lead_id = headers["Location"].removeprefix("/thanks/")
+                lead = server.get_lead(lead_id)
+                for field in address:
+                    self.assertEqual(lead[field], supplied.get(field, "").strip())
+                status, _headers, body = self.request(headers["Location"])
+                self.assertEqual(status, 200)
+                self.assertIn(b"Thank you, Taylor Smith.", body)
+
+    def test_customer_enquiry_rejects_invalid_supplied_address_fields(self):
         form = urlencode({
             "customer_type": "individual",
             "full_name": "Taylor Smith",
